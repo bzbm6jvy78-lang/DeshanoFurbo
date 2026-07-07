@@ -26,7 +26,7 @@ def obtener_datos_whoscored(url):
         # Simulamos un navegador real para que WhoScored no nos bloquee
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
+        }
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
             st.error(f"No se pudo acceder a la página (Código de error: {response.status_code})")
@@ -69,16 +69,16 @@ if url_input:
                         events_to_plot.append((ev['x'], ev['y']))
                     elif event_filter == "Pases" and tipo == "Pass":
                         events_to_plot.append((ev['x'], ev['y']))
-                    elif event_filter == "Tiros" and tipo == "SavedShot" or tipo == "MissedShots" or tipo == "Goal":
+                    elif event_filter == "Tiros" and (tipo in ["SavedShot", "MissedShots", "Goal"]):
                         events_to_plot.append((ev['x'], ev['y']))
                     elif event_filter == "Faltas" and tipo == "Foul":
                         events_to_plot.append((ev['x'], ev['y']))
-                    elif event_filter == "Recuperaciones" and tipo == "Tackle" or tipo == "Interception":
+                    elif event_filter == "Recuperaciones" and (tipo in ["Tackle", "Interception"]):
                         events_to_plot.append((ev['x'], ev['y']))
 
             st.success(f"¡Éxito! Se han cargado {len(events_to_plot)} eventos de tipo '{event_filter}'.")
 
-# --- DISEÑO DEL CAMPO DE FÚTBOL ---
+# --- DISEÑO DEL CAMPO DE FÚTLEBOL ---
 pitch = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='#444444', goal_type='line')
 fig, ax = pitch.draw(figsize=(11, 8))
 
