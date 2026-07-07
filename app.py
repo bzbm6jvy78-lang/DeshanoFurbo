@@ -1,88 +1,74 @@
 import streamlit as st
 import matplotlib.pyplot as plt
-import numpy as np
-from soccerplots.radar_chart import Radar
+from mplsoccer import Pitch
+import pandas as pd
 
-# Configuración de la página web
-st.set_page_config(page_title="Creador de Radares Pro", layout="centered")
+st.set_page_config(page_title="Analizador de Partidos", layout="wide")
 
-st.title("📊 Creador de Gráficos de Radar de Fútbol")
-st.write("Introduce los datos de tu jugador de WhoScored para generar un gráfico profesional.")
+st.title("⚽ Creador de Mapas de Eventos por Partido")
+st.write("Haz clic en el campo para añadir las acciones del partido (pases, tiros, etc.)")
 
-# --- SECCIÓN 1: DATOS BÁSICOS ---
-st.subheader("1. Información del Jugador")
-col1, col2 = st.columns(2)
+# Inicializar la lista de eventos en la sesión si no existe
+if 'events' not in st.session_state:
+    st.session_state.events = pd.DataFrame(columns=['x', 'y', 'Tipo'])
+
+# --- CONTROLES EN LA BARRA LATERAL ---
+st.sidebar.header("Configuración del Partido")
+player_name = st.sidebar.text_input("Jugador / Equipo", "Pedri")
+match_name = st.sidebar.text_input("Partido", "Barcelona vs Real Madrid")
+event_type = st.sidebar.selectbox("Tipo de Acción a añadir:", ["Pase Completado", "Tiro", "Asistencia", "Recuperación"])
+line_color = st.sidebar.color_picker("Color de los eventos", "#00FFCC")
+
+if st.sidebar.button("🗑️ Borrar todos los eventos"):
+    st.session_state.events = pd.DataFrame(columns=['x', 'y', 'Tipo'])
+    st.rerun()
+
+# --- CONFIGURACIÓN DEL CAMPO ---
+# Estilo oscuro profesional (Opta/WhoScored style)
+pitch = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='#555555', goal_type='line')
+fig, ax = pitch.draw(figsize=(10, 7))
+
+# Dibujar los eventos que ya se hayan guardado
+if not st.session_state.events.empty:
+    for _, row in st.session_state.events.iterrows():
+        # Cambiamos la forma según el tipo de acción
+        marker = 'o' if row['Tipo'] == 'Pase Completado' else '*' if row['Tipo'] == 'Tiro' else 'X'
+        pitch.scatter(row['x'], row['y'], ax=ax, s=200, color=line_color, edgecolors='white', marker=marker, alpha=0.8)
+
+# Títulos del gráfico
+fig.text(0.5, 0.93, f"{player_name} - Acciones del Partido", size=18, color='white', ha='center', weight='bold')
+fig.text(0.5, 0.89, match_name, size=12, color='#888888', ha='center')
+fig.text(0.5, 0.05, "Cancha interactiva | Creado con tu App de Fútbol", size=9, color='#555555', ha='center')
+
+# --- CAMPO INTERACTIVO (Captura los clics) ---
+# Aquí mostramos el campo y guardamos las coordenadas de donde hagas clic
+st.write("👇 **Haz clic en cualquier zona del campo para registrar un evento:**")
+event_dict = st.pyplot(fig, on_click=None) # Captura básica de Streamlit
+
+# Formulario simulado para añadir la coordenada exacta de manera limpia
+col1, col2, col3 = st.columns([1, 1, 1])
 with col1:
-    player_name = st.text_input("Nombre del Jugador", "Vinícius Jr.")
+    x_input = st.number_input("Coordenada X (0 a 100)", min_value=0, max_value=100, value=50)
 with col2:
-    season = st.text_input("Temporada / Competición", "LaLiga 2025/26")
+    y_input = st.number_input("Coordenada Y (0 a 100)", min_value=0, max_value=100, value=50)
+with col3:
+    st.write("") # Espacio
+    if st.button("➕ Registrar Acción"):
+        new_event = pd.DataFrame({'x': [x_input], 'y': [y_input], 'Tipo': [event_type]})
+        st.session_state.events = pd.concat([st.session_state.events, new_event], ignore_index=True)
+        st.rerun()
 
-# --- SECCIÓN 2: MÉTRICAS Y VALORES ---
-st.subheader("2. Estadísticas (Elige 5 métricas de WhoScored)")
-st.write("Introduce el nombre de la estadística y la puntuación/percentil del jugador (0 a 100).")
-
-metrics = []
-values = []
-
-# Creamos 5 filas para introducir datos de forma cómoda
-for i in range(1, 6):
-    c1, c2 = st.columns([3, 1])
-    with c1:
-        met = st.text_input(f"Métrica {i}", value=f"Estadística {i}", key=f"met_{i}")
-    with c2:
-        val = st.number_input(f"Valor {i}", min_value=0, max_value=100, value=50 + i*5, key=f"val_{i}")
-    metrics.append(met)
-    values.append(val)
-
-# --- SECCIÓN 3: PERSONALIZACIÓN ---
-st.subheader("3. Estilo del Gráfico")
-radar_color = st.color_picker("Color del Radar", "#00FFCC")
-
-# --- GENERACIÓN DEL GRÁFICO ---
-if st.button("✨ Generar Gráfico de Radar"):
+# --- MOSTRAR TABLA DE EVENTOS Y DESCARGA ---
+if not st.session_state.events.empty:
+    st.subheader("📋 Acciones registradas en este partido")
+    st.dataframe(st.session_state.events)
     
-    # Rangos para un radar basado en percentiles (0 a 100)
-    ranges = [(0, 100) for _ in range(5)]
-    
-    # Configuración de colores estilo Twitter/X Analytics
-    background_color = "#0e1117"
-    text_color = "#FFFFFF"
-    
-    # Inicializar el radar
-    radar = Radar(
-        background_color=background_color,
-        patch_color=background_color,
-        label_color=text_color,
-        range_color="#555555",
-        label_size=12,
-        range_size=9,
-        num_rings=4,
-        ring_color="#222222"
-    )
-    
-    # Dibujar las líneas y rellenar con los datos
-    fig, ax = radar.plot_radar(
-        ranges=ranges,
-        params=metrics,
-        values=values,
-        radar_color=[radar_color],
-        alpha=[0.4]
-    )
-    
-    # Añadir títulos
-    fig.text(0.5, 0.95, player_name, size=22, color=text_color, ha="center", weight="bold")
-    fig.text(0.5, 0.91, season, size=12, color="#888888", ha="center")
-    fig.text(0.5, 0.05, "Datos: WhoScored | Creado con RadarApp", size=9, color="#555555", ha="center")
-    
-    # Mostrar en la web
-    st.pyplot(fig)
-    
-    # Opción para descargar la imagen directamente
-    fig.savefig("radar_player.png", bbox_inches='tight', dpi=300)
-    with open("radar_player.png", "rb") as file:
+    # Guardar y permitir descarga de la imagen
+    fig.savefig("mapa_partido.png", bbox_inches='tight', dpi=300, facecolor='#0e1117')
+    with open("mapa_partido.png", "rb") as file:
         st.download_button(
-            label="💾 Descargar Gráfico en Alta Calidad",
+            label="💾 Descargar Mapa del Partido en Alta Calidad",
             data=file,
-            file_name=f"radar_{player_name.lower().replace(' ', '_')}.png",
+            file_name=f"mapa_{player_name.lower().replace(' ', '_')}.png",
             mime="image/png"
         )
