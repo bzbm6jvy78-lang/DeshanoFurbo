@@ -1,74 +1,107 @@
 import streamlit as st
 import matplotlib.pyplot as plt
 from mplsoccer import Pitch
-import pandas as pd
+import requests
+import re
+import json
 
-st.set_page_config(page_title="Analizador de Partidos", layout="wide")
+st.set_page_config(page_title="Analizador Automático de WhoScored", layout="wide")
 
-st.title("⚽ Creador de Mapas de Eventos por Partido")
-st.write("Haz clic en el campo para añadir las acciones del partido (pases, tiros, etc.)")
+st.title("📊 Extractor y Analizador de Partidos de WhoScored")
+st.write("Introduce el enlace del partido de WhoScored y la app dibujará todos los eventos automáticamente.")
 
-# Inicializar la lista de eventos en la sesión si no existe
-if 'events' not in st.session_state:
-    st.session_state.events = pd.DataFrame(columns=['x', 'y', 'Tipo'])
+# --- CONTROLES LATERALES ---
+st.sidebar.header("Configuración del Gráfico")
+url_input = st.sidebar.text_input(
+    "Enlace del partido de WhoScored:", 
+    placeholder="https://www.whoscored.com/Matches/..."
+)
+event_filter = st.sidebar.selectbox("Filtrar por tipo de acción:", ["Todos los eventos", "Pases", "Tiros", "Faltas", "Recuperaciones"])
+line_color = st.sidebar.color_picker("Color de los puntos", "#00FFCC")
+marker_size = st.sidebar.slider("Tamaño de los puntos", 100, 500, 250)
 
-# --- CONTROLES EN LA BARRA LATERAL ---
-st.sidebar.header("Configuración del Partido")
-player_name = st.sidebar.text_input("Jugador / Equipo", "Pedri")
-match_name = st.sidebar.text_input("Partido", "Barcelona vs Real Madrid")
-event_type = st.sidebar.selectbox("Tipo de Acción a añadir:", ["Pase Completado", "Tiro", "Asistencia", "Recuperación"])
-line_color = st.sidebar.color_picker("Color de los eventos", "#00FFCC")
+# --- FUNCIÓN PARA RASPAR LA URL ---
+def obtener_datos_whoscored(url):
+    try:
+        # Simulamos un navegador real para que WhoScored no nos bloquee
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        response = requests.get(url, headers=headers)
+        if response.status_code != 200:
+            st.error(f"No se pudo acceder a la página (Código de error: {response.status_code})")
+            return None
+        
+        # Buscamos la variable matchCentreData que contiene todos los eventos del partido
+        match = re.search(r"matchCentreData\s*=\s*({.*?});", response.text)
+        if match:
+            json_data = match.group(1)
+            return json.loads(json_data)
+        else:
+            st.error("No se encontraron datos de eventos en este enlace. Asegúrate de que es un partido finalizado o en directo de WhoScored.")
+            return None
+    except Exception as e:
+        st.error(f"Error al conectar con WhoScored: {e}")
+        return None
 
-if st.sidebar.button("🗑️ Borrar todos los eventos"):
-    st.session_state.events = pd.DataFrame(columns=['x', 'y', 'Tipo'])
-    st.rerun()
+# --- PROCESAMIENTO Y DIBUJO ---
+events_to_plot = []
+home_team = "Equipo Local"
+away_team = "Equipo Visitante"
 
-# --- CONFIGURACIÓN DEL CAMPO ---
-# Estilo oscuro profesional (Opta/WhoScored style)
-pitch = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='#555555', goal_type='line')
-fig, ax = pitch.draw(figsize=(10, 7))
+if url_input:
+    with st.spinner("Extrayendo datos de WhoScored..."):
+        data = obtener_datos_whoscored(url_input)
+        
+        if data:
+            home_team = data.get('home', {}).get('name', 'Local')
+            away_team = data.get('away', {}).get('name', 'Visitante')
+            
+            # Extraemos la lista de eventos del partido
+            all_events = data.get('events', [])
+            
+            for ev in all_events:
+                if 'x' in ev and 'y' in ev:
+                    # Filtrado básico por tipo de evento
+                    tipo = ev.get('type', {}).get('displayName', '')
+                    
+                    if event_filter == "Todos los eventos":
+                        events_to_plot.append((ev['x'], ev['y']))
+                    elif event_filter == "Pases" and tipo == "Pass":
+                        events_to_plot.append((ev['x'], ev['y']))
+                    elif event_filter == "Tiros" and tipo == "SavedShot" or tipo == "MissedShots" or tipo == "Goal":
+                        events_to_plot.append((ev['x'], ev['y']))
+                    elif event_filter == "Faltas" and tipo == "Foul":
+                        events_to_plot.append((ev['x'], ev['y']))
+                    elif event_filter == "Recuperaciones" and tipo == "Tackle" or tipo == "Interception":
+                        events_to_plot.append((ev['x'], ev['y']))
 
-# Dibujar los eventos que ya se hayan guardado
-if not st.session_state.events.empty:
-    for _, row in st.session_state.events.iterrows():
-        # Cambiamos la forma según el tipo de acción
-        marker = 'o' if row['Tipo'] == 'Pase Completado' else '*' if row['Tipo'] == 'Tiro' else 'X'
-        pitch.scatter(row['x'], row['y'], ax=ax, s=200, color=line_color, edgecolors='white', marker=marker, alpha=0.8)
+            st.success(f"¡Éxito! Se han cargado {len(events_to_plot)} eventos de tipo '{event_filter}'.")
 
-# Títulos del gráfico
-fig.text(0.5, 0.93, f"{player_name} - Acciones del Partido", size=18, color='white', ha='center', weight='bold')
-fig.text(0.5, 0.89, match_name, size=12, color='#888888', ha='center')
-fig.text(0.5, 0.05, "Cancha interactiva | Creado con tu App de Fútbol", size=9, color='#555555', ha='center')
+# --- DISEÑO DEL CAMPO DE FÚTBOL ---
+pitch = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='#444444', goal_type='line')
+fig, ax = pitch.draw(figsize=(11, 8))
 
-# --- CAMPO INTERACTIVO (Captura los clics) ---
-# Aquí mostramos el campo y guardamos las coordenadas de donde hagas clic
-st.write("👇 **Haz clic en cualquier zona del campo para registrar un evento:**")
-event_dict = st.pyplot(fig, on_click=None) # Captura básica de Streamlit
+# Pintar las coordenadas extraídas si existen
+if events_to_plot:
+    for x, y in events_to_plot:
+        pitch.scatter(x, y, ax=ax, s=marker_size, color=line_color, edgecolors='white', linewidth=1, alpha=0.7, zorder=3)
 
-# Formulario simulado para añadir la coordenada exacta de manera limpia
-col1, col2, col3 = st.columns([1, 1, 1])
-with col1:
-    x_input = st.number_input("Coordenada X (0 a 100)", min_value=0, max_value=100, value=50)
-with col2:
-    y_input = st.number_input("Coordenada Y (0 a 100)", min_value=0, max_value=100, value=50)
-with col3:
-    st.write("") # Espacio
-    if st.button("➕ Registrar Acción"):
-        new_event = pd.DataFrame({'x': [x_input], 'y': [y_input], 'Tipo': [event_type]})
-        st.session_state.events = pd.concat([st.session_state.events, new_event], ignore_index=True)
-        st.rerun()
+# Títulos del gráfico automatizados con los nombres reales de los equipos
+fig.text(0.5, 0.94, f"{home_team} vs {away_team}", size=22, color='white', ha='center', weight='bold')
+fig.text(0.5, 0.89, f"Mapa de acciones: {event_filter}", size=14, color='#888888', ha='center')
+fig.text(0.5, 0.04, "Gráfico generado automáticamente | Datos extraídos de WhoScored", size=10, color='#666666', ha='center')
 
-# --- MOSTRAR TABLA DE EVENTOS Y DESCARGA ---
-if not st.session_state.events.empty:
-    st.subheader("📋 Acciones registradas en este partido")
-    st.dataframe(st.session_state.events)
-    
-    # Guardar y permitir descarga de la imagen
-    fig.savefig("mapa_partido.png", bbox_inches='tight', dpi=300, facecolor='#0e1117')
-    with open("mapa_partido.png", "rb") as file:
+# Mostrar en Streamlit
+st.pyplot(fig)
+
+# --- BOTÓN DE DESCARGA ---
+if events_to_plot:
+    fig.savefig("mapa_autowhoscored.png", bbox_inches='tight', dpi=300, facecolor='#0e1117')
+    with open("mapa_autowhoscored.png", "rb") as file:
         st.download_button(
-            label="💾 Descargar Mapa del Partido en Alta Calidad",
+            label="💾 Descargar Gráfico para Redes Sociales",
             data=file,
-            file_name=f"mapa_{player_name.lower().replace(' ', '_')}.png",
+            file_name=f"mapa_{home_team.lower()}_vs_{away_team.lower()}.png",
             mime="image/png"
         )
