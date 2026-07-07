@@ -1,4 +1,5 @@
 streamlit
 matplotlib
 mplsoccer
-requests
+cloudscraper
+seaborn
