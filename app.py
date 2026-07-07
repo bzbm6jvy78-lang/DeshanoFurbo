@@ -1,85 +1,70 @@
 import streamlit as st
 import matplotlib.pyplot as plt
 from mplsoccer import Pitch
-import cloudscraper
 import re
 import json
 
-st.set_page_config(page_title="Analizador Táctico de WhoScored", layout="wide")
+st.set_page_config(page_title="Analizador Táctico Antí-Bloqueo", layout="wide")
 
 st.title("📊 Extractor de Eventos por Jugador - WhoScored")
-st.write("Introduce el enlace del partido, elige al jugador y genera su mapa de acciones individual.")
+st.write("Esquiva las restricciones de Cloudflare pegando el código fuente del partido.")
 
 # --- BARRA LATERAL ---
-st.sidebar.header("1. Enlace del Partido")
-url_input = st.sidebar.text_input(
-    "URL de WhoScored:", 
-    placeholder="https://www.whoscored.com/Matches/..."
+st.sidebar.header("1. Datos del Partido")
+
+# Cuadro para pegar el código fuente directamente
+html_paste = st.sidebar.text_area(
+    "Pega aquí el código fuente (Ctrl+U / Cmd+U):", 
+    height=150,
+    placeholder="Pega todo el texto copiado de la pestaña del código fuente..."
 )
 
-# --- BACKEND: EXTRACCIÓN DE DATOS ---
-@st.cache_data(show_spinner=False)
-def descargar_datos_partido(url):
-    try:
-        scraper = cloudscraper.create_scraper(
-            browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
-        )
-        response = scraper.get(url)
-        if response.status_code != 200:
-            return None
-            
-        match = re.search(r"matchCentreData\s*=\s*({.*?});", response.text)
-        if match:
-            return json.loads(match.group(1))
-        return None
-    except:
-        return None
-
-# --- PROCESAMIENTO DE JUGADORES Y EVENTOS ---
+# --- PROCESAMIENTO DE DATOS LOCAL (SIN BLOQUEOS DE RED) ---
 match_data = None
 lista_jugadores = {}
 player_selected_id = None
 
-if url_input:
-    match_data = descargar_datos_partido(url_input)
-    
-    if match_data:
-        # Creamos un diccionario con el ID del jugador y su Nombre Real
-        # WhoScored separa los jugadores por equipo local (home) y visitante (away)
-        for team in ['home', 'away']:
-            players = match_data.get(team, {}).get('players', [])
-            for p in players:
-                p_id = p.get('playerId')
-                p_name = p.get('name')
-                if p_id and p_name:
-                    lista_jugadores[p_name] = p_id
-                    
-        st.sidebar.success("¡Datos del partido cargados con éxito!")
+if html_paste:
+    # Buscamos la variable matchCentreData directamente en el texto pegado
+    match = re.search(r"matchCentreData\s*=\s*({.*?});", html_paste)
+    if match:
+        try:
+            match_data = json.loads(match.group(1))
+            st.sidebar.success("¡Datos del partido procesados correctamente!")
+        except Exception as e:
+            st.sidebar.error(f"Error al procesar el formato de los datos: {e}")
     else:
-        st.sidebar.error("No se pudieron extraer los datos. Verifica el enlace o las restricciones de Cloudflare.")
+        st.sidebar.error("No se encontró la variable 'matchCentreData'. Asegúrate de haber copiado todo el código fuente de la página correcta.")
 
-# --- CONTROLES DE FILTRADO (Solo aparecen si hay datos) ---
+if match_data:
+    for team in ['home', 'away']:
+        players = match_data.get(team, {}).get('players', [])
+        for p in players:
+            p_id = p.get('playerId')
+            p_name = p.get('name')
+            if p_id and p_name:
+                lista_jugadores[p_name] = p_id
+
+# --- CONTROLES DE FILTRADO ---
 st.sidebar.header("2. Filtros del Mapa")
 if lista_jugadores:
-    # Menú desplegable con los nombres ordenados alfabéticamente
     nombres_ordenados = sorted(list(lista_jugadores.keys()))
     player_selected_name = st.sidebar.selectbox("Selecciona un Jugador:", nombres_ordenados)
     player_selected_id = lista_jugadores[player_selected_name]
 else:
-    st.sidebar.warning("Introduce una URL válida para ver la lista de jugadores.")
+    st.sidebar.warning("Sigue las instrucciones de abajo para cargar los jugadores.")
     player_selected_name = "Jugador"
 
 event_filter = st.sidebar.selectbox("Acción táctica:", ["Todos los eventos", "Pases", "Tiros", "Recuperaciones (Entradas/Intercepciones)"])
 tipo_grafico = st.sidebar.selectbox("Tipo de visualización:", ["Mapa de Puntos", "Mapa de Calor"])
 line_color = st.sidebar.color_picker("Color del elemento", "#00FFCC")
 
-# --- FILTRAR EVENTOS DEL JUGADOR SELECCIONADO ---
+# --- FILTRAR EVENTOS DEL JUGADOR ---
 events_to_plot = []
 
 if match_data and player_selected_id:
     all_events = match_data.get('events', [])
     for ev in all_events:
-        # Condición clave: Que el evento pertenezca al ID del jugador seleccionado
         if ev.get('playerId') == player_selected_id and 'x' in ev and 'y' in ev:
             tipo_nombre = ev.get('type', {}).get('displayName', '')
             
@@ -103,12 +88,20 @@ if events_to_plot:
     elif tipo_grafico == "Mapa de Calor":
         import seaborn as sns
         sns.kdeplot(x=x_coords, y=y_coords, ax=ax, fill=True, cmap="mako", alpha=0.5, thresh=0.05, levels=100, zorder=2)
-    st.info(f"Mostrando {len(events_to_plot)} acciones de {player_selected_name}.")
-elif url_input and match_data:
-    st.warning(f"No se encontraron eventos de tipo '{event_filter}' para {player_selected_name} en este partido.")
 
-# Títulos dinámicos con el nombre del futbolista elegido
-fig.text(0.5, 0.94, player_name_title := player_selected_name, size=24, color='white', ha='center', weight='bold')
+fig.text(0.5, 0.94, player_selected_name, size=24, color='white', ha='center', weight='bold')
 fig.text(0.5, 0.89, f"Mapa de acciones: {event_filter}", size=14, color='#888888', ha='center')
 
 st.pyplot(fig)
+
+# --- INSTRUCCIONES EN PANTALLA PRINCIPAL ---
+if not html_paste:
+    st.info("""
+    ### 📖 Cómo usar la app en 10 segundos:
+    1. Abre el partido que quieras en **WhoScored** desde tu navegador.
+    2. Pulsa **`Ctrl + U`** (en Windows) o **`Cmd + Option + U`** (en Mac). Se abrirá una pestaña nueva llena de código de texto.
+    3. Pulsa **`Ctrl + A`** (o `Cmd + A`) para seleccionar todo ese texto y **cópialo**.
+    4. Pégalo en la caja grande de la barra lateral de esta app.
+    
+    ¡Listo! Al momento aparecerá el desplegable con todos los jugadores del partido sin sufrir bloqueos de Cloudflare.
+    """)
